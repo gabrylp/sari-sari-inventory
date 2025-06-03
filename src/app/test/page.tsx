@@ -1,35 +1,26 @@
-// src/app/test/page.tsx
 'use client';
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient'; // adjust the path as needed
 
-export default function TestPage() {
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function SupabaseTest() {
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchProducts() {
+    async function testFetch() {
       const { data, error } = await supabase.from('products').select('*');
-      if (error) console.error('Error fetching products:', error);
-      else setProducts(data || []);
-      setLoading(false);
+      if (error) {
+        console.error('❌ Supabase fetch error:', error);
+        setError(error.message);
+      } else {
+        console.log('✅ Data:', data);
+      }
     }
-    
-    fetchProducts();
+    testFetch();
   }, []);
 
   return (
-    <div className="text-white p-4">
-      <h1 className="text-xl font-bold mb-2">Test Supabase Connection</h1>
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <ul className="list-disc pl-5">
-          {products.map((product, index) => (
-            <li key={index}>{product.name}</li>
-          ))}
-        </ul>
-      )}
+    <div>
+      {error ? <p className="text-red-500">Error: {error}</p> : <p>Check console for data</p>}
     </div>
   );
 }
