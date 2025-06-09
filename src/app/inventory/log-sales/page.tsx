@@ -20,8 +20,8 @@ export default function LogSalesPage() {
   const [search, setSearch] = useState('');
   const [sortByAZ, setSortByAZ] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loggingSaleId, setLoggingSaleId] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState('');
+  const [activeProductId, setActiveProductId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState('1');
   const [saleType, setSaleType] = useState<'sale' | 'utang'>('sale');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -70,14 +70,16 @@ export default function LogSalesPage() {
       return 0; // default no specific order
     });
 
-  async function handleLogSale(productId: string) {
+  async function handleLogSale() {
+    if (!activeProductId) return;
+    
     if (!quantity || Number(quantity) <= 0) {
       setMessage('Enter a valid quantity');
       return;
     }
 
     const qty = Number(quantity);
-    const product = products.find((p) => p.id === productId);
+    const product = products.find((p) => p.id === activeProductId);
     if (!product) {
       setMessage('Product not found');
       return;
@@ -86,7 +88,7 @@ export default function LogSalesPage() {
     if (saleType === 'sale') {
       const { error } = await supabase.from('sales').insert([
         {
-          product_id: productId,
+          product_id: activeProductId,
           quantity: qty,
           sale_type: 'sale',
         },
@@ -109,7 +111,7 @@ export default function LogSalesPage() {
       const { error } = await supabase.from('utang').insert([
         {
           customer_id: selectedCustomerId,
-          product_id: productId,
+          product_id: activeProductId,
           quantity: qty,
           total_price: totalPrice,
           status: 'unpaid',
@@ -126,12 +128,31 @@ export default function LogSalesPage() {
   }
 
   function resetForm() {
-    setLoggingSaleId(null);
-    setQuantity('');
+    setActiveProductId(null);
+    setQuantity('1');
     setSelectedCustomerId(null);
     setSaleType('sale');
     fetchProducts();
   }
+
+  const handleQuantityChange = (value: string) => {
+    const numValue = parseInt(value);
+    if (!isNaN(numValue)) {
+      setQuantity(Math.max(1, numValue).toString());
+    } else if (value === '') {
+      setQuantity('');
+    }
+  };
+
+  const incrementQuantity = () => {
+    const newQuantity = parseInt(quantity || '1') + 1;
+    setQuantity(newQuantity.toString());
+  };
+
+  const decrementQuantity = () => {
+    const newQuantity = Math.max(1, parseInt(quantity || '1') - 1);
+    setQuantity(newQuantity.toString());
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -179,25 +200,29 @@ export default function LogSalesPage() {
                 <td className="py-3 px-6">{product.product_name}</td>
                 <td className="py-3 px-6">{product.selling_price.toFixed(2)}</td>
                 <td className="py-3 px-6">
-                  {loggingSaleId === product.id ? (
-                    <div className="flex space-x-2 items-center">
-                      <input
-                        type="number"
-                        min="1"
-                        value={quantity}
-                        onChange={(e) => setQuantity(e.target.value)}
-                        className="w-20 px-2 py-1 rounded-md bg-gray-700 text-white focus:outline-yellow-400"
-                        placeholder="Qty"
-                      />
-
-                      <select
-                        value={saleType}
-                        onChange={(e) => setSaleType(e.target.value as 'sale' | 'utang')}
-                        className="px-2 py-1 rounded-md bg-gray-700 text-white focus:outline-yellow-400"
-                      >
-                        <option value="sale">Sale</option>
-                        <option value="utang">Utang</option>
-                      </select>
+                  {activeProductId === product.id ? (
+                    <div className="flex flex-col space-y-3">
+                      <div className="flex space-x-2 items-center">
+                        <button
+                          onClick={decrementQuantity}
+                          className="w-8 h-8 rounded-full bg-yellow-400 text-gray-900 flex items-center justify-center hover:bg-yellow-500 transition"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          value={quantity}
+                          onChange={(e) => handleQuantityChange(e.target.value)}
+                          className="w-20 px-2 py-1 rounded-md bg-gray-700 text-white focus:outline-yellow-400 text-center"
+                        />
+                        <button
+                          onClick={incrementQuantity}
+                          className="w-8 h-8 rounded-full bg-yellow-400 text-gray-900 flex items-center justify-center hover:bg-yellow-500 transition"
+                        >
+                          +
+                        </button>
+                      </div>
 
                       {saleType === 'utang' && (
                         <select
@@ -216,39 +241,48 @@ export default function LogSalesPage() {
                         </select>
                       )}
 
-                      <button
-                        onClick={() => handleLogSale(product.id)}
-                        className="bg-yellow-400 px-3 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition"
-                      >
-                        Save
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setLoggingSaleId(null);
-                          setQuantity('');
-                          setSelectedCustomerId(null);
-                          setSaleType('sale');
-                          setMessage('');
-                        }}
-                        className="text-gray-400 hover:text-yellow-400"
-                      >
-                        Cancel
-                      </button>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={handleLogSale}
+                          className="bg-yellow-400 px-3 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition flex-1"
+                        >
+                          Confirm {saleType === 'sale' ? 'Sale' : 'Utang'}
+                        </button>
+                        <button
+                          onClick={resetForm}
+                          className="bg-gray-600 px-3 py-1 rounded-md text-white font-semibold hover:bg-gray-700 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => {
-                        setLoggingSaleId(product.id);
-                        setQuantity('');
-                        setSaleType('sale');
-                        setSelectedCustomerId(null);
-                        setMessage('');
-                      }}
-                      className="bg-yellow-400 px-4 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition"
-                    >
-                      Log Sale / Utang
-                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => {
+                          setActiveProductId(product.id);
+                          setQuantity('1');
+                          setSaleType('sale');
+                          setSelectedCustomerId(null);
+                          setMessage('');
+                        }}
+                        className="bg-yellow-400 px-3 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition"
+                      >
+                        Sale
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActiveProductId(product.id);
+                          setQuantity('1');
+                          setSaleType('utang');
+                          setSelectedCustomerId(null);
+                          setMessage('');
+                        }}
+                        className="bg-purple-500 px-3 py-1 rounded-md text-white font-semibold hover:bg-purple-600 transition"
+                      >
+                        Utang
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>
