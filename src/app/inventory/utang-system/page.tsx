@@ -1,16 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '@/lib/clientApi';
+import { formatMoney } from '@/lib/format';
+import { Badge, Button, Card, EmptyState, Input, Segmented } from '@/components/ui';
 
-type Customer = {
-  id: string;
-  name: string;
-  created_at: string;
-};
+type Balance = { id: string; name: string; unpaid_total: number; unpaid_count: number };
 
 type UtangEntry = {
   id: string;
+  customer_id: string;
   product_id: string | null;
   product_name?: string;
   quantity: number;
@@ -20,454 +19,322 @@ type UtangEntry = {
   paid_at: string | null;
 };
 
-type Product = {
-  id: string;
-  product_name: string;
-};
+const fmtP = formatMoney;
 
 export default function UtangSystemPage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [utangEntries, setUtangEntries] = useState<UtangEntry[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [balances, setBalances] = useState<Balance[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [entries, setEntries] = useState<UtangEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isError, setIsError] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'unpaid' | 'paid'>('all');
 
-  // For editing utang
-  const [editingUtangId, setEditingUtangId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState('');
   const [editStatus, setEditStatus] = useState<'unpaid' | 'paid'>('unpaid');
 
-  // Fetch all customers
-  useEffect(() => {
-    fetchCustomers();
-    fetchProducts();
+  const fetchBalances = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/utang/balances');
+      setBalances(data ?? []);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error fetching customers');
+      setIsError(true);
+    }
   }, []);
 
-  // Fetch utang entries when selected customer or filter changes
-  useEffect(() => {
-    if (selectedCustomerId) {
-      fetchUtangEntries(selectedCustomerId);
-    } else {
-      setUtangEntries([]);
-    }
-  }, [selectedCustomerId, filterStatus]);
-
-  async function fetchCustomers() {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('id, name, created_at')
-      .order('name', { ascending: true });
-
-    if (error) {
-      setMessage('Error fetching customers: ' + error.message);
-      return;
-    }
-
-    setCustomers(data || []);
-  }
-
-  async function fetchProducts() {
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, product_name');
-
-    if (error) {
-      setMessage('Error fetching products: ' + error.message);
-      return;
-    }
-
-    setProducts(data || []);
-  }
-
-  async function fetchUtangEntries(customerId: string) {
+  const fetchEntries = useCallback(async (customerId: string) => {
     setLoading(true);
-
-    let query = supabase
-      .from('utang')
-      .select(
-  `
-    id,
-    product_id,
-    quantity,
-    total_price,
-    status,
-    created_at,
-    paid_at,
-    products!inner(product_name)
-  `
-)
-      .eq('customer_id', customerId);
-
-    if (filterStatus !== 'all') {
-      query = query.eq('status', filterStatus);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      setMessage('Error fetching utang entries: ' + error.message);
+    try {
+      const query = new URLSearchParams({ customer_id: customerId });
+      if (filterStatus !== 'all') query.set('status', filterStatus);
+      const { data } = await api.get(`/api/utang?${query.toString()}`);
+      setEntries(data ?? []);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error fetching utang entries');
+      setIsError(true);
+    } finally {
       setLoading(false);
-      return;
     }
+  }, [filterStatus]);
 
-    // Map product_name from joined products table
-    const utangWithProductNames = (data || []).map((u) => ({
-  id: u.id,
-  product_id: u.product_id,
-  product_name: u.products[0]?.product_name ?? 'Unknown',
-  quantity: u.quantity,
-  total_price: u.total_price,
-  status: u.status,
-  created_at: u.created_at,
-  paid_at: u.paid_at,
-}));
+  useEffect(() => {
+    fetchBalances();
+  }, [fetchBalances]);
 
+  useEffect(() => {
+    if (selectedId) fetchEntries(selectedId);
+    else setEntries([]);
+  }, [selectedId, fetchEntries]);
 
-    setUtangEntries(utangWithProductNames);
-    setLoading(false);
-  }
+  const filters: { value: 'all' | 'unpaid' | 'paid'; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'unpaid', label: 'Unpaid' },
+    { value: 'paid', label: 'Paid' },
+  ];
+
+  const selectedBalance = balances.find((b) => b.id === selectedId);
 
   async function addCustomer() {
     if (!newCustomerName.trim()) {
       setMessage('Customer name cannot be empty');
+      setIsError(true);
       return;
     }
-    const { data, error } = await supabase
-      .from('customers')
-      .insert([{ name: newCustomerName.trim() }])
-      .select();
-
-    if (error) {
-      setMessage('Error adding customer: ' + error.message);
-      return;
+    try {
+      await api.post('/api/customers', { name: newCustomerName.trim() });
+      setNewCustomerName('');
+      fetchBalances();
+      setMessage('Customer added successfully');
+      setIsError(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error adding customer');
+      setIsError(true);
     }
-
-    setNewCustomerName('');
-    fetchCustomers();
-    setMessage('Customer added successfully');
   }
 
   async function deleteCustomer(id: string) {
-    if (!confirm('Are you sure you want to delete this customer and all their utang?')) return;
-
-    const { error } = await supabase.from('customers').delete().eq('id', id);
-
-    if (error) {
-      setMessage('Error deleting customer: ' + error.message);
-      return;
+    if (!confirm('Delete this customer and all their utang?')) return;
+    try {
+      await api.del(`/api/customers/${id}`);
+      if (selectedId === id) {
+        setSelectedId(null);
+        setEntries([]);
+      }
+      fetchBalances();
+      setMessage('Customer deleted');
+      setIsError(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error deleting customer');
+      setIsError(true);
     }
-
-    if (selectedCustomerId === id) {
-      setSelectedCustomerId(null);
-      setUtangEntries([]);
-    }
-
-    fetchCustomers();
-    setMessage('Customer deleted');
   }
 
-  async function markUtangPaid(utangId: string) {
-    // Update utang status and paid_at
-    const now = new Date().toISOString();
-
-    const { data: utangData, error: fetchUtangError } = await supabase
-      .from('utang')
-      .select('*')
-      .eq('id', utangId)
-      .single();
-
-    if (fetchUtangError) {
-      setMessage('Error fetching utang: ' + fetchUtangError.message);
-      return;
-    }
-
-    if (utangData.status === 'paid') {
-      setMessage('Utang already paid');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('utang')
-      .update({ status: 'paid', paid_at: now })
-      .eq('id', utangId);
-
-    if (error) {
-      setMessage('Error marking utang paid: ' + error.message);
-      return;
-    }
-
-    // Optionally, add a sale record for paid utang
-    const { error: saleError } = await supabase.from('sales').insert([
-      {
-        product_id: utangData.product_id,
-        quantity: utangData.quantity,
-        sale_type: 'utang-paid',
-      },
-    ]);
-
-    if (saleError) {
-      setMessage('Utang marked paid but failed to add sale: ' + saleError.message);
-    } else {
+  async function markPaid(utangId: string) {
+    try {
+      await api.put(`/api/utang/${utangId}`, { mark_paid: true });
       setMessage('Utang marked as paid and sale recorded');
+      setIsError(false);
+      fetchEntries(selectedId!);
+      fetchBalances();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error marking utang paid');
+      setIsError(true);
     }
-
-    fetchUtangEntries(selectedCustomerId!);
   }
 
   async function deleteUtang(utangId: string) {
-    if (!confirm('Are you sure you want to delete this utang entry?')) return;
-
-    const { error } = await supabase.from('utang').delete().eq('id', utangId);
-
-    if (error) {
-      setMessage('Error deleting utang: ' + error.message);
-      return;
+    if (!confirm('Delete this utang entry?')) return;
+    try {
+      await api.del(`/api/utang/${utangId}`);
+      fetchEntries(selectedId!);
+      fetchBalances();
+      setMessage('Utang deleted');
+      setIsError(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error deleting utang');
+      setIsError(true);
     }
-
-    fetchUtangEntries(selectedCustomerId!);
-    setMessage('Utang deleted');
   }
 
-  function startEditUtang(utang: UtangEntry) {
-    setEditingUtangId(utang.id);
-    setEditQuantity(utang.quantity.toString());
-    setEditStatus(utang.status);
+  function startEdit(u: UtangEntry) {
+    setEditingId(u.id);
+    setEditQuantity(u.quantity.toString());
+    setEditStatus(u.status);
     setMessage('');
+    setIsError(false);
   }
 
-  async function saveEditUtang() {
-    if (!editingUtangId) return;
-    const qtyNum = Number(editQuantity);
-    if (!qtyNum || qtyNum <= 0) {
-      setMessage('Quantity must be a positive number');
+  async function saveEdit() {
+    if (!editingId) return;
+    const qty = Number(editQuantity);
+    if (!qty || qty <= 0) {
+      setMessage('Quantity must be positive');
+      setIsError(true);
       return;
     }
-
-    const updateData: any = { quantity: qtyNum, status: editStatus };
-    if (editStatus === 'paid') {
-      updateData.paid_at = new Date().toISOString();
-    } else {
-      updateData.paid_at = null;
+    try {
+      await api.put(`/api/utang/${editingId}`, { quantity: qty, status: editStatus });
+      setEditingId(null);
+      fetchEntries(selectedId!);
+      fetchBalances();
+      setMessage('Utang updated');
+      setIsError(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error updating utang');
+      setIsError(true);
     }
-
-    const { error } = await supabase.from('utang').update(updateData).eq('id', editingUtangId);
-
-    if (error) {
-      setMessage('Error updating utang: ' + error.message);
-      return;
-    }
-
-    setEditingUtangId(null);
-    fetchUtangEntries(selectedCustomerId!);
-    setMessage('Utang updated');
   }
 
-  function cancelEdit() {
-    setEditingUtangId(null);
-    setMessage('');
-  }
-
-  // Calculate total unpaid
-  const totalUnpaid = utangEntries
+  const totalUnpaid = entries
     .filter((u) => u.status === 'unpaid')
     .reduce((sum, u) => sum + Number(u.total_price), 0);
 
+  const msgClass = isError ? 'text-warn' : 'text-ok';
+
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-4xl font-bold mb-6 text-yellow-400">Utang System</h1>
+    <div className="max-w-6xl mx-auto space-y-6">
+      <h1 className="text-3xl font-bold text-ink">Utang System</h1>
 
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold mb-2 text-yellow-300">Customers</h2>
-        <div className="flex space-x-2 mb-4">
-          <input
-            type="text"
-            placeholder="New customer name"
-            value={newCustomerName}
-            onChange={(e) => setNewCustomerName(e.target.value)}
-            className="px-4 py-2 rounded-md bg-gray-800 text-white border border-gray-600 focus:outline-yellow-400"
-          />
-          <button
-            onClick={addCustomer}
-            className="bg-yellow-400 px-4 py-2 rounded-md font-semibold text-gray-900 hover:bg-yellow-500 transition"
-          >
-            Add Customer
-          </button>
-        </div>
-
-        <ul className="max-h-40 overflow-auto border border-gray-700 rounded-md bg-gray-800 text-white">
-          {customers.map((cust) => (
-            <li
-              key={cust.id}
-              className={`cursor-pointer px-4 py-2 flex justify-between items-center hover:bg-yellow-400 hover:text-gray-900 transition ${
-                selectedCustomerId === cust.id ? 'bg-yellow-400 text-gray-900 font-semibold' : ''
-              }`}
-              onClick={() => setSelectedCustomerId(cust.id)}
-            >
-              <span>{cust.name}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteCustomer(cust.id);
-                }}
-                className="text-red-600 hover:text-red-400 font-bold"
-                title="Delete customer"
-              >
-                &times;
-              </button>
-            </li>
-          ))}
-          {customers.length === 0 && (
-            <li className="px-4 py-2 text-gray-400">No customers found.</li>
-          )}
-        </ul>
+      <div className="flex gap-2">
+        <Input
+          className="max-w-xs"
+          placeholder="New customer name"
+          value={newCustomerName}
+          onChange={(e) => setNewCustomerName(e.target.value)}
+        />
+        <Button onClick={addCustomer}>Add Customer</Button>
       </div>
 
-      {selectedCustomerId && (
-        <>
-          <h2 className="text-2xl font-semibold mb-2 text-yellow-300">
-            Utang Entries for{' '}
-            {customers.find((c) => c.id === selectedCustomerId)?.name || ''}
-          </h2>
-
-          <div className="mb-4">
-            <label className="mr-4 text-white font-semibold">Filter Status:</label>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="px-3 py-1 rounded-md bg-gray-800 text-white border border-gray-600 focus:outline-yellow-400"
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {balances.length === 0 ? (
+          <EmptyState>No customers yet.</EmptyState>
+        ) : (
+          balances.map((b) => (
+            <Card
+              key={b.id}
+              className={`p-4 cursor-pointer transition border ${
+                selectedId === b.id ? 'border-accent' : 'hover:border-accent'
+              }`}
+              onClick={() => setSelectedId(b.id)}
             >
-              <option value="all">All</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
-            </select>
+              <div className="flex justify-between items-start">
+                <div className="min-w-0">
+                  <p className="font-bold text-ink truncate">{b.name}</p>
+                  <p className="text-xs text-sub">
+                    {b.unpaid_count} utang item{b.unpaid_count === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteCustomer(b.id);
+                  }}
+                  className="text-sub hover:text-warn font-bold px-1"
+                  title="Delete customer"
+                >
+                  &times;
+                </button>
+              </div>
+              <p className={`mt-2 text-xl font-extrabold ${b.unpaid_count > 0 ? 'text-warn' : 'text-ok'}`}>
+                {fmtP(b.unpaid_total)}
+              </p>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {selectedId && (
+        <Card className="p-5">
+          <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+            <h2 className="text-xl font-bold text-ink">
+              {balances.find((b) => b.id === selectedId)?.name ?? 'Customer'} — {fmtP(totalUnpaid)} unpaid
+            </h2>
+            <Segmented<'all' | 'unpaid' | 'paid'>
+              value={filterStatus}
+              onChange={setFilterStatus}
+              options={filters}
+            />
           </div>
 
           {loading ? (
-            <p className="text-white">Loading utang entries...</p>
+            <p className="text-ink">Loading entries…</p>
+          ) : entries.length === 0 ? (
+            <EmptyState>No utang entries.</EmptyState>
           ) : (
-            <table className="w-full text-left border-collapse bg-gray-800 rounded-md overflow-hidden shadow-lg">
-              <thead className="bg-yellow-400 text-gray-900">
-                <tr>
-                  <th className="py-3 px-6">Product</th>
-                  <th className="py-3 px-6">Quantity</th>
-                  <th className="py-3 px-6">Total Price</th>
-                  <th className="py-3 px-6">Status</th>
-                  <th className="py-3 px-6">Created At</th>
-                  <th className="py-3 px-6">Paid At</th>
-                  <th className="py-3 px-6">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {utangEntries.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-6 text-gray-400">
-                      No utang entries found.
-                    </td>
+            <div className="overflow-auto max-h-[70vh] pr-1">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-line text-sub text-xs">
+                    <th className="p-2">Product</th>
+                    <th className="p-2 text-right">Qty</th>
+                    <th className="p-2 text-right">Total</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2">Created</th>
+                    <th className="p-2">Paid</th>
+                    <th className="p-2 text-right">Actions</th>
                   </tr>
-                )}
-
-                {utangEntries.map((u) => (
-                  <tr key={u.id} className="border-b border-gray-700">
-                    <td className="py-3 px-6">{u.product_name || 'Unknown'}</td>
-
-                    <td className="py-3 px-6">
-                      {editingUtangId === u.id ? (
-                        <input
-                          type="number"
-                          min="1"
-                          value={editQuantity}
-                          onChange={(e) => setEditQuantity(e.target.value)}
-                          className="w-20 px-2 py-1 rounded-md bg-gray-700 text-white focus:outline-yellow-400"
-                        />
-                      ) : (
-                        u.quantity
-                      )}
-                    </td>
-
-                    <td className="py-3 px-6">{u.total_price.toFixed(2)}</td>
-
-                    <td className="py-3 px-6">
-                      {editingUtangId === u.id ? (
-                        <select
-                          value={editStatus}
-                          onChange={(e) => setEditStatus(e.target.value as 'paid' | 'unpaid')}
-                          className="px-2 py-1 rounded-md bg-gray-700 text-white focus:outline-yellow-400"
-                        >
-                          <option value="unpaid">Unpaid</option>
-                          <option value="paid">Paid</option>
-                        </select>
-                      ) : (
-                        u.status
-                      )}
-                    </td>
-
-                    <td className="py-3 px-6">
-                      {new Date(u.created_at).toLocaleDateString('en-US')}
-                    </td>
-
-                    <td className="py-3 px-6">
-                      {u.paid_at ? new Date(u.paid_at).toLocaleDateString('en-US') : '-'}
-                    </td>
-
-                    <td className="py-3 px-6 space-x-2">
-                      {editingUtangId === u.id ? (
-                        <>
-                          <button
-                            onClick={saveEditUtang}
-                            className="bg-yellow-400 px-3 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={cancelEdit}
-                            className="text-gray-400 hover:text-yellow-400"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          {u.status === 'unpaid' && (
-                            <button
-                              onClick={() => markUtangPaid(u.id)}
-                              className="bg-green-600 px-3 py-1 rounded-md text-white font-semibold hover:bg-green-700 transition"
+                </thead>
+                <tbody>
+                  {entries.map((u) => (
+                    <tr key={u.id} className="border-b border-line text-ink text-sm">
+                      <td className="p-2 font-semibold">{u.product_name ?? 'Unknown'}</td>
+                      <td className="p-2 text-right">
+                        {editingId === u.id ? (
+                          <Input
+                            type="number"
+                            min="1"
+                            value={editQuantity}
+                            onChange={(e) => setEditQuantity(e.target.value)}
+                            className="w-20 px-2 py-1 text-right"
+                          />
+                        ) : (
+                          u.quantity
+                        )}
+                      </td>
+                      <td className="p-2 text-right">{fmtP(u.total_price)}</td>
+                      <td className="p-2">
+                        {editingId === u.id ? (
+                          <Segmented<'unpaid' | 'paid'>
+                            value={editStatus}
+                            onChange={setEditStatus}
+                            options={[
+                              { value: 'unpaid', label: 'Unpaid' },
+                              { value: 'paid', label: 'Paid' },
+                            ]}
+                          />
+                        ) : (
+                          <Badge tone={u.status === 'paid' ? 'ok' : 'warn'}>{u.status}</Badge>
+                        )}
+                      </td>
+                      <td className="p-2 text-sub">
+                        {new Date(u.created_at).toLocaleDateString('en-US')}
+                      </td>
+                      <td className="p-2 text-sub">
+                        {u.paid_at ? new Date(u.paid_at).toLocaleDateString('en-US') : '-'}
+                      </td>
+                      <td className="p-2 text-right whitespace-nowrap">
+                        {editingId === u.id ? (
+                          <>
+                            <Button variant="ok" className="py-1 px-3 text-sm" onClick={saveEdit}>
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              className="py-1 px-3 text-sm ml-2"
+                              onClick={() => setEditingId(null)}
                             >
-                              Mark Paid
-                            </button>
-                          )}
-                          <button
-                            onClick={() => startEditUtang(u)}
-                            className="bg-yellow-400 px-3 py-1 rounded-md text-gray-900 font-semibold hover:bg-yellow-500 transition"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => deleteUtang(u.id)}
-                            className="bg-red-600 px-3 py-1 rounded-md text-white font-semibold hover:bg-red-700 transition"
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            {u.status === 'unpaid' && (
+                              <Button variant="ok" className="py-1 px-3 text-sm" onClick={() => markPaid(u.id)}>
+                                Collect
+                              </Button>
+                            )}
+                            <Button variant="ghost" className="py-1 px-3 text-sm ml-2" onClick={() => startEdit(u)}>
+                              Edit
+                            </Button>
+                            <Button variant="danger" className="py-1 px-3 text-sm ml-2" onClick={() => deleteUtang(u.id)}>
+                              Delete
+                            </Button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-
-          <div className="mt-4 text-yellow-400 font-semibold text-lg">
-            Total Unpaid: ₱{totalUnpaid.toFixed(2)}
-          </div>
-        </>
+        </Card>
       )}
 
-      {message && (
-        <p className="mt-6 text-center text-yellow-300 font-semibold">{message}</p>
-      )}
+      {message && <p className={`text-center font-semibold ${msgClass}`}>{message}</p>}
     </div>
   );
 }

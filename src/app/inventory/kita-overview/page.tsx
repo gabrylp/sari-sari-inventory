@@ -1,222 +1,229 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '@/lib/clientApi';
+import { formatMoney, toLocalDateString } from '@/lib/format';
+import { Button, Card, EmptyState, Select, StatCard } from '@/components/ui';
 
-type DailyProfit = {
-  id: number;
-  date: string; // YYYY-MM-DD
-  profit: number;
-};
+type DailyProfit = { id: number; date: string; profit: number };
+
+const fmtP = formatMoney;
 
 export default function KitaOverview() {
-  const [profitHistory, setProfitHistory] = useState<DailyProfit[]>([]);
+  const [history, setHistory] = useState<DailyProfit[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isError, setIsError] = useState(false);
+  const [month, setMonth] = useState('');
   const [total7DaysProfit, setTotal7DaysProfit] = useState(0);
   const [profitToday, setProfitToday] = useState(0);
 
-  // Fetch profit history and summary on mount
-  useEffect(() => {
-    fetchProfitData();
-  }, []);
-
-  async function fetchProfitData() {
+  const fetchProfitData = useCallback(async (defaultMonth?: string) => {
     setLoading(true);
     setMessage('');
-
+    setIsError(false);
     try {
-      // Fetch all profit records ordered by date descending
-      let { data, error } = await supabase
-        .from('daily_profit')
-        .select('*')
-        .order('date', { ascending: false });
+      const { data } = await api.get('/api/profit');
+      const rows: DailyProfit[] = data ?? [];
+      setHistory(rows);
 
-      if (error) throw error;
+      const todayStr = toLocalDateString(new Date());
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      if (!data) data = [];
-
-      setProfitHistory(data);
-
-      // Calculate total profit for past 7 days and today
-      const todayStr = new Date().toISOString().slice(0, 10);
-
-      // Filter last 7 days including today (assuming data.date format 'YYYY-MM-DD')
-      const last7Days = data.filter((d) => {
-        const dDate = new Date(d.date);
-        const now = new Date();
-        const diffDays = (now.getTime() - dDate.getTime()) / (1000 * 3600 * 24);
+      const last7 = rows.filter((d) => {
+        const [y, m, day] = d.date.split('-').map(Number);
+        const past = new Date(y, m - 1, day);
+        const diffDays = Math.floor((startOfToday.getTime() - past.getTime()) / 86_400_000);
         return diffDays >= 0 && diffDays < 7;
       });
+      setTotal7DaysProfit(last7.reduce((s, d) => s + d.profit, 0));
+      setProfitToday(rows.find((d) => d.date === todayStr)?.profit ?? 0);
 
-      const total7 = last7Days.reduce((sum, day) => sum + day.profit, 0);
-      setTotal7DaysProfit(total7);
+      if (!defaultMonth && rows.length > 0) setMonth(rows[0].date.slice(0, 7));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error loading profit data');
+      setIsError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-      const todayProfitRecord = data.find((d) => d.date === todayStr);
-      setProfitToday(todayProfitRecord?.profit || 0);
-    } catch (error: any) {
-      setMessage('Error loading profit data: ' + error.message);
+  useEffect(() => {
+    fetchProfitData();
+  }, [fetchProfitData]);
+
+  const months = useMemo(() => {
+    const set = new Set<string>();
+    history.forEach((d) => set.add(d.date.slice(0, 7)));
+    return Array.from(set).sort().reverse();
+  }, [history]);
+
+  const monthDays = useMemo(() => {
+    if (!month) return [];
+    return history.filter((d) => d.date.startsWith(month)).sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [history, month]);
+  const monthTotal = monthDays.reduce((s, d) => s + d.profit, 0);
+
+  function toggleSelect(id: number) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.length === monthDays.length && monthDays.length > 0) setSelectedIds([]);
+    else setSelectedIds(monthDays.map((d) => d.id));
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.length === 0) {
+      setMessage('No entries selected for deletion.');
+      setIsError(true);
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    setIsError(false);
+    try {
+      await api.post('/api/profit', { action: 'delete', ids: selectedIds });
+      setMessage('Selected entries deleted.');
+      setSelectedIds([]);
+      fetchProfitData();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error deleting entries');
+      setIsError(true);
     } finally {
       setLoading(false);
     }
   }
 
-  // Select or deselect profit entry by id
-  function toggleSelect(id: number) {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  }
-
-  // Delete selected profit entries
-  async function handleDeleteSelected() {
-    if (selectedIds.length === 0) {
-      setMessage('No entries selected for deletion.');
-      return;
-    }
-
-    setLoading(true);
-    setMessage('');
-
-    const { error } = await supabase
-      .from('daily_profit')
-      .delete()
-      .in('id', selectedIds);
-
-    if (error) {
-      setMessage('Error deleting entries: ' + error.message);
-    } else {
-      setMessage('Selected entries deleted.');
-      setSelectedIds([]);
-      fetchProfitData();
-    }
-
-    setLoading(false);
-  }
-
-  // RPC call to update daily profit
   async function handleUpdateProfit() {
     setLoading(true);
     setMessage('');
-
-    const { error } = await supabase.rpc('update_daily_profit');
-
-    if (error) {
-      setMessage('Error updating profit: ' + error.message);
-    } else {
+    setIsError(false);
+    try {
+      await api.post('/api/profit', { action: 'update' });
       setMessage('Daily profit updated successfully!');
       fetchProfitData();
-    }
-
-    setLoading(false);
-  }
-
-  // Select all entries toggle
-  function toggleSelectAll() {
-    if (selectedIds.length === profitHistory.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(profitHistory.map((p) => p.id));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Error updating profit');
+      setIsError(true);
+    } finally {
+      setLoading(false);
     }
   }
+
+  const msgClass = isError ? 'text-warn' : 'text-ok';
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-4xl font-bold mb-6 text-yellow-400">Kita Overview</h1>
-
-      {/* Summary cards */}
-      <div className="flex justify-between mb-8 space-x-4">
-        <div className="bg-gray-800 p-6 rounded shadow flex-1 text-center">
-          <p className="text-gray-400 font-semibold mb-2">Total Profit (Last 7 Days)</p>
-          <p className="text-3xl font-bold text-yellow-400">
-            ₱{total7DaysProfit.toFixed(2)}
-          </p>
-        </div>
-        <div className="bg-gray-800 p-6 rounded shadow flex-1 text-center">
-          <p className="text-gray-400 font-semibold mb-2">Profit Today</p>
-          <p className="text-3xl font-bold text-yellow-400">₱{profitToday.toFixed(2)}</p>
-        </div>
-        <div className="flex items-center">
-          <button
-            onClick={handleUpdateProfit}
-            disabled={loading}
-            className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold px-6 py-3 rounded"
-          >
-            {loading ? 'Updating...' : 'Update Profit'}
-          </button>
-        </div>
+    <div className="max-w-6xl mx-auto space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-ink">Kita Overview</h1>
+        <Button disabled={loading} onClick={handleUpdateProfit}>
+          {loading ? 'Updating…' : 'Update Profit'}
+        </Button>
       </div>
 
-      {/* Profit History Table */}
-      <div className="bg-gray-800 rounded shadow p-4">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-yellow-400">Profit History</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard label="Total Profit (Last 7 Days)" value={fmtP(total7DaysProfit)} />
+        <StatCard label="Profit Today" value={fmtP(profitToday)} />
+        {month && <StatCard label={`${month} Total`} value={fmtP(monthTotal)} tone="ok" />}
+      </div>
+
+      <Card className="p-5">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+          <h2 className="text-xl font-semibold text-ink">Profit History</h2>
+          <Select value={month} onChange={(e) => setMonth(e.target.value)}>
+            <option value="">All months</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        {monthDays.length > 0 && (
+          <div className="flex items-end gap-2 h-32 mb-6">
+            {monthDays.map((d) => (
+              <div key={d.id} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}: ${fmtP(d.profit)}`}>
+                <span className="text-[10px] text-sub">{fmtP(d.profit)}</span>
+                <div
+                  className="w-full bg-accent rounded-t"
+                  style={{
+                    height: `${Math.max(
+                      4,
+                      (d.profit / Math.max(1, ...monthDays.map((x) => x.profit))) * 80
+                    )}px`,
+                  }}
+                />
+                <span className="text-[10px] text-sub">{d.date.slice(8)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mb-2">
           <button
             onClick={toggleSelectAll}
-            className="text-yellow-400 underline hover:text-yellow-300"
+            className="text-accent underline text-sm font-semibold hover:text-ink"
           >
-            {selectedIds.length === profitHistory.length ? 'Deselect All' : 'Select All'}
+            {selectedIds.length === monthDays.length && monthDays.length > 0
+              ? 'Deselect All'
+              : 'Select All'}
+          </button>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={loading || selectedIds.length === 0}
+            className="text-warn font-bold text-sm disabled:opacity-40"
+          >
+            Delete Selected ({selectedIds.length})
           </button>
         </div>
 
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b border-gray-700">
-              <th className="p-3">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.length === profitHistory.length && profitHistory.length > 0}
-                  onChange={toggleSelectAll}
-                />
-              </th>
-              <th className="p-3">Date</th>
-              <th className="p-3 text-right">Profit (₱)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {profitHistory.length === 0 && (
-              <tr>
-                <td colSpan={3} className="text-center py-4 text-gray-400">
-                  No profit records found.
-                </td>
-              </tr>
-            )}
-            {profitHistory.map(({ id, date, profit }) => (
-              <tr
-                key={id}
-                className={`border-b border-gray-700 hover:bg-gray-700 cursor-pointer ${
-                  selectedIds.includes(id) ? 'bg-yellow-700/30' : ''
-                }`}
-                onClick={() => toggleSelect(id)}
-              >
-                <td className="p-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      toggleSelect(id);
-                    }}
-                  />
-                </td>
-                <td className="p-3">{date}</td>
-                <td className="p-3 text-right">₱{profit.toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {monthDays.length === 0 ? (
+          <EmptyState>No profit records for this month.</EmptyState>
+        ) : (
+          <div className="overflow-auto max-h-[70vh] pr-1">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-line text-sub text-xs">
+                  <th className="p-2 w-10"></th>
+                  <th className="p-2">Date</th>
+                  <th className="p-2 text-right">Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthDays.map((d) => (
+                  <tr
+                    key={d.id}
+                    className={`border-b border-line text-ink text-sm cursor-pointer hover:bg-card ${
+                      selectedIds.includes(d.id) ? 'bg-accent/10' : ''
+                    }`}
+                    onClick={() => toggleSelect(d.id)}
+                  >
+                    <td className="p-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(d.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(d.id);
+                        }}
+                        className="w-4 h-4 accent-accent"
+                      />
+                    </td>
+                    <td className="p-2">{d.date}</td>
+                    <td className="p-2 text-right">{fmtP(d.profit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
-        <button
-          onClick={handleDeleteSelected}
-          disabled={loading || selectedIds.length === 0}
-          className="mt-4 bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded disabled:opacity-50"
-        >
-          Delete Selected
-        </button>
-
-        {message && <p className="mt-4 text-yellow-400">{message}</p>}
-      </div>
+      {message && <p className={`text-center font-semibold ${msgClass}`}>{message}</p>}
     </div>
   );
 }
