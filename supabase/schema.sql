@@ -11,14 +11,18 @@
 --      API routes, which use the service role key (bypasses RLS).
 
 -- 1) POS columns (idempotent):
---    products.stock_quantity      -> low-stock alerts
---    products.product_code        -> barcode/scanner-friendly quick code
---    products.category            -> POS filter chips
---    sales.payment_method         -> how the sale was paid
+--    products.stock_quantity     -> low-stock alerts
+--    products.product_code       -> barcode/scanner-friendly quick code
+--    products.category           -> cart category chips
+--    products.pieces_per_pack    -> boxed/multi-unit goods: units in one pack (e.g. 24)
+--    products.pack_cost          -> what a whole pack costs you (auto unit-cost calc)
+--    sales.payment_method        -> how the sale was paid
 alter table public.products
   add column if not exists stock_quantity integer,
   add column if not exists product_code text,
-  add column if not exists category text;
+  add column if not exists category text,
+  add column if not exists pieces_per_pack integer check (pieces_per_pack is null or pieces_per_pack >= 2),
+  add column if not exists pack_cost numeric check (pack_cost is null or pack_cost >= 0);
 
 alter table public.sales
   add column if not exists payment_method text

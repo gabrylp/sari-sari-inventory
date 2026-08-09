@@ -13,6 +13,8 @@ type Product = {
   selling_price: number;
   grocery_price: number;
   stock_quantity?: number | null;
+  pieces_per_pack?: number | null;
+  pack_cost?: number | null;
   bought_count?: number | null;
 };
 
@@ -28,6 +30,8 @@ const emptyForm = {
   selling_price: 0,
   grocery_price: 0,
   stock_quantity: '',
+  pieces_per_pack: '',
+  pack_cost: '',
 };
 
 export default function ManageProductsPage() {
@@ -97,7 +101,14 @@ export default function ManageProductsPage() {
   const requestSort = (key: keyof Product) => {
     setSortConfig((prev) => ({
       key,
-      direction: prev?.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending',
+      direction:
+        prev?.key === key
+          ? prev.direction === 'ascending'
+            ? 'descending'
+            : 'ascending'
+          : key === 'id'
+            ? 'descending'
+            : 'ascending',
     }));
   };
 
@@ -115,8 +126,34 @@ export default function ManageProductsPage() {
       stock_quantity: product.stock_quantity === null || product.stock_quantity === undefined
         ? ''
         : String(product.stock_quantity),
+      pieces_per_pack:
+        product.pieces_per_pack === null || product.pieces_per_pack === undefined
+          ? ''
+          : String(product.pieces_per_pack),
+      pack_cost:
+        product.pack_cost === null || product.pack_cost === undefined ? '' : String(product.pack_cost),
     });
     setMessage(null);
+  }
+
+  function setPackPieces(v: string) {
+    setForm((prev) => {
+      const pieces = Number(v);
+      const cost = Number(prev.pack_cost);
+      const grocery =
+        v && prev.pack_cost && pieces >= 2 && cost > 0 ? (cost / pieces).toFixed(2) : prev.grocery_price;
+      return { ...prev, pieces_per_pack: v, grocery_price: Number(grocery) };
+    });
+  }
+
+  function setPackCost(v: string) {
+    setForm((prev) => {
+      const pieces = Number(prev.pieces_per_pack);
+      const cost = Number(v);
+      const grocery =
+        prev.pieces_per_pack && v && pieces >= 2 && cost > 0 ? (cost / pieces).toFixed(2) : prev.grocery_price;
+      return { ...prev, pack_cost: v, grocery_price: Number(grocery) };
+    });
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -136,6 +173,8 @@ export default function ManageProductsPage() {
         selling_price: Number(form.selling_price),
         grocery_price: Number(form.grocery_price),
         stock_quantity: form.stock_quantity === '' ? null : Number(form.stock_quantity),
+        pieces_per_pack: form.pieces_per_pack === '' ? null : Number(form.pieces_per_pack),
+        pack_cost: form.pack_cost === '' ? null : Number(form.pack_cost),
       });
       setMessage({ text: 'Product updated successfully!', isError: false });
       setEditProduct(null);
@@ -221,7 +260,7 @@ export default function ManageProductsPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
         />
         <div className="flex gap-2">
-          {(['bought_count', 'product_name', 'selling_price', 'stock_quantity'] as const).map((key) => (
+          {(['bought_count', 'id', 'product_name', 'selling_price', 'stock_quantity'] as const).map((key) => (
             <button
               key={key}
               onClick={() => requestSort(key)}
@@ -238,7 +277,9 @@ export default function ManageProductsPage() {
                   ? 'Price'
                   : key === 'stock_quantity'
                     ? 'Stock'
-                    : 'Frequent'}{' '}
+                    : key === 'id'
+                      ? 'Recent'
+                      : 'Frequent'}{' '}
               {sortIndicator(key)}
             </button>
           ))}
@@ -280,6 +321,7 @@ export default function ManageProductsPage() {
                 <th className="p-2">Product</th>
                 <th className="p-2">Code</th>
                 <th className="p-2">Category</th>
+                <th className="p-2 text-right">Pack</th>
                 <th className="p-2 text-right">Selling</th>
                 <th className="p-2 text-right">Grocery</th>
                 <th className="p-2 text-right">Stock</th>
@@ -304,6 +346,9 @@ export default function ManageProductsPage() {
                     <td className="p-2 font-semibold">{p.product_name}</td>
                     <td className="p-2 text-sub">{p.product_code ?? '—'}</td>
                     <td className="p-2 text-sub">{p.category ?? '—'}</td>
+                    <td className="p-2 text-right text-sub">
+                      {p.pieces_per_pack ? `${p.pieces_per_pack} / pack` : '—'}
+                    </td>
                     <td className="p-2 text-right">{fmtP(p.selling_price)}</td>
                     <td className="p-2 text-right">{fmtP(p.grocery_price)}</td>
                     <td className="p-2 text-right">
@@ -381,6 +426,31 @@ export default function ManageProductsPage() {
                 value={form.stock_quantity}
                 onChange={(e) => setForm({ ...form, stock_quantity: e.target.value })}
                 placeholder="—"
+              />
+            </div>
+          </div>
+
+<div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block mb-1 font-semibold text-ink">Pieces / pack</label>
+              <Input
+                type="number"
+                step="1"
+                min="2"
+                value={form.pieces_per_pack}
+                onChange={(e) => setPackPieces(e.target.value)}
+                placeholder="e.g. 24"
+              />
+            </div>
+            <div>
+              <label className="block mb-1 font-semibold text-ink">Pack cost (₱)</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.pack_cost}
+                onChange={(e) => setPackCost(e.target.value)}
+                placeholder="e.g. 130"
               />
             </div>
           </div>

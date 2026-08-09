@@ -63,6 +63,27 @@ export async function POST(request: Request) {
   const category = String(body.category ?? '').trim();
   if (category) insertPayload.category = category;
 
+  const piecesPerPack = body.pieces_per_pack;
+  const packCost = body.pack_cost;
+  if (piecesPerPack !== undefined && piecesPerPack !== null && piecesPerPack !== '') {
+    const pieces = Number(piecesPerPack);
+    if (!Number.isInteger(pieces) || pieces < 2) {
+      return NextResponse.json({ error: 'Pieces per pack must be a whole number of at least 2' }, { status: 400 });
+    }
+    insertPayload.pieces_per_pack = pieces;
+  } else {
+    insertPayload.pieces_per_pack = null;
+  }
+  if (packCost !== undefined && packCost !== null && packCost !== '') {
+    const cost = Number(packCost);
+    if (!Number.isFinite(cost) || cost < 0) {
+      return NextResponse.json({ error: 'Pack cost must be a positive amount' }, { status: 400 });
+    }
+    insertPayload.pack_cost = cost;
+  } else {
+    insertPayload.pack_cost = null;
+  }
+
   const { data, error } = await admin
     .from('products')
     .insert([insertPayload])

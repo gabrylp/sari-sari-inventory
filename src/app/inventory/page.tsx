@@ -11,6 +11,7 @@ type Product = CartProduct & {
   grocery_price: number;
   stock_quantity?: number | null;
   category?: string | null;
+  pieces_per_pack?: number | null;
   bought_count?: number | null;
 };
 
@@ -51,7 +52,7 @@ export default function PosPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [sortMode, setSortMode] = useState<
-    'freq' | 'name-asc' | 'name-desc' | 'price-asc' | 'price-desc'
+    'freq' | 'recent' | 'name-asc' | 'name-desc' | 'price-asc' | 'price-desc'
   >('freq');
   const [lines, setLines] = useState<{ product: CartProduct; qty: number }[]>([]);
   const [payment, setPayment] = useState<'cash' | 'gcash' | 'utang'>('cash');
@@ -135,6 +136,9 @@ export default function PosPage() {
         break;
       case 'price-desc':
         sorted.sort((a, b) => b.selling_price - a.selling_price || byName(a, b));
+        break;
+      case 'recent':
+        sorted.sort((a, b) => Number(b.id) - Number(a.id) || byName(a, b));
         break;
       default:
         sorted.sort(
@@ -423,8 +427,18 @@ export default function PosPage() {
           >
             ?
           </Button>
+          <Button
+            variant="purple"
+            className="shrink-0 px-3 py-2 text-sm"
+            onClick={() => {
+              setSearch('gcash');
+              searchRef.current?.focus();
+            }}
+          >
+            GCash
+          </Button>
         </div>
-        {term && filtered.length === 0 && !quickAddOpen && (
+        {term && filtered.length === 0 && !quickAddOpen && !showGcashTiles && (
           <p className="text-sm text-warn font-semibold">
             No match for “{term}” — press <Kbd>Enter</Kbd> or <Kbd>F6</Kbd> to add it.
           </p>
@@ -449,6 +463,7 @@ export default function PosPage() {
             className="ml-auto w-40 text-xs py-1"
           >
             <option value="freq">Frequent ↓</option>
+            <option value="recent">Newest Added ↓</option>
             <option value="name-asc">Name A–Z</option>
             <option value="name-desc">Name Z–A</option>
             <option value="price-asc">Price Low → High</option>
@@ -456,31 +471,38 @@ export default function PosPage() {
           </Select>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
-          {filtered.length === 0 ? (
+          {filtered.length === 0 && !showGcashTiles ? (
             <EmptyState>No products found.</EmptyState>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2">
               {showGcashTiles && (
-                <div className="col-span-full grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {(
-                    [
-                      ['cashin', 'GCash Cash-In', 'Customer pays cash, you send to GCash'],
-                      ['cashout', 'GCash Cash-Out', 'Customer pays via GCash, you give cash'],
-                    ] as const
-                  ).map(([kind, title, sub]) => (
-                    <button
-                      key={kind}
-                      onClick={() => openGcash(kind)}
-                      className="text-left p-3 rounded-lg border-2 border-dashed border-purple/50 bg-purple/10 hover:bg-purple/20 transition col-span-1"
-                    >
-                      <p className="text-sm font-extrabold text-purple-ink">{title}</p>
-                      <p className="text-xs text-sub mt-0.5">{sub}</p>
-                      <p className="text-xs text-purple mt-1.5 font-semibold">
-                        Fee from your tier table · set at entry
-                      </p>
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="col-span-full grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {(
+                      [
+                        ['cashin', 'GCash Cash-In', 'Customer pays cash, you send to GCash'],
+                        ['cashout', 'GCash Cash-Out', 'Customer pays via GCash, you give cash'],
+                      ] as const
+                    ).map(([kind, title, sub]) => (
+                      <button
+                        key={kind}
+                        onClick={() => openGcash(kind)}
+                        className="text-left p-3 rounded-lg border-2 border-dashed border-purple/50 bg-purple/10 hover:bg-purple/20 transition col-span-1"
+                      >
+                        <p className="text-sm font-extrabold text-purple-ink">{title}</p>
+                        <p className="text-xs text-sub mt-0.5">{sub}</p>
+                        <p className="text-xs text-purple mt-1.5 font-semibold">
+                          Fee from your tier table · set at entry
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                  {filtered.length === 0 && (
+                    <p className="col-span-full text-sm text-sub">
+                      Cash services shown — delete “{term}” to browse products.
+                    </p>
+                  )}
+                </>
               )}
               {filtered.map((p) => {
                 const qtyInCart = qtyById.get(String(p.id)) ?? 0;
@@ -510,6 +532,11 @@ export default function PosPage() {
                         />
                       )}
                     </div>
+                    {(p.pieces_per_pack ?? 0) > 1 && (
+                      <p className="text-[10px] text-sub mt-0.5 truncate">
+                        pack of {p.pieces_per_pack}
+                      </p>
+                    )}
                   </button>
                 );
               })}
