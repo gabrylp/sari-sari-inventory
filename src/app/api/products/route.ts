@@ -16,16 +16,13 @@ export async function GET(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const { data: soldRows, error: soldError } = await admin
-    .from('sales')
-    .select('product_id, quantity');
+  const { data: soldRows, error: soldError } = await admin.rpc('get_product_sold_counts');
 
   if (soldError) return NextResponse.json({ error: soldError.message }, { status: 500 });
 
   const boughtCount = new Map<string, number>();
   for (const row of soldRows ?? []) {
-    const key = String(row.product_id);
-    boughtCount.set(key, (boughtCount.get(key) ?? 0) + Number(row.quantity ?? 0));
+    boughtCount.set(String(row.product_id), Number(row.sold ?? 0));
   }
 
   const withCounts = (data ?? []).map((p) => ({

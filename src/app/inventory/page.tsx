@@ -12,6 +12,7 @@ type Product = CartProduct & {
   stock_quantity?: number | null;
   category?: string | null;
   pieces_per_pack?: number | null;
+  created_at?: string | null;
   bought_count?: number | null;
 };
 
@@ -89,7 +90,10 @@ export default function PosPage() {
   const [gMsgError, setGMsgError] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.get('/api/products'), api.get('/api/customers')])
+    Promise.all([
+      api.get('/api/products', { ttl: 30000 }),
+      api.get('/api/customers', { ttl: 30000 }),
+    ])
       .then(([p, c]) => {
         setProducts(p.data ?? []);
         setCustomers(c.data ?? []);
@@ -138,7 +142,11 @@ export default function PosPage() {
         sorted.sort((a, b) => b.selling_price - a.selling_price || byName(a, b));
         break;
       case 'recent':
-        sorted.sort((a, b) => Number(b.id) - Number(a.id) || byName(a, b));
+        sorted.sort(
+          (a, b) =>
+            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime() ||
+            byName(a, b)
+        );
         break;
       default:
         sorted.sort(

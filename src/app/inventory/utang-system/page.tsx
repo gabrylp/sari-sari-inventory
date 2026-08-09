@@ -37,7 +37,7 @@ export default function UtangSystemPage() {
 
   const fetchBalances = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/utang/balances');
+      const { data } = await api.get('/api/utang/balances', { ttl: 30000 });
       setBalances(data ?? []);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Error fetching customers');

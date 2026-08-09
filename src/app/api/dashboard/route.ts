@@ -31,14 +31,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: customersResult.error.message }, { status: 500 });
   }
 
-  const recentSales = (salesResult.data ?? []).map((s) => ({
-    id: s.id,
-    product_name: s.products?.[0]?.product_name ?? 'Unknown',
-    selling_price: s.products?.[0]?.selling_price ?? 0,
-    quantity: s.quantity,
-    sale_type: s.sale_type,
-    created_at: s.created_at,
-  }));
+  const recentSales = (salesResult.data ?? []).map((s) => {
+    const prod = Array.isArray(s.products) ? s.products[0] : s.products;
+    return {
+      id: s.id,
+      product_name: prod?.product_name ?? 'Unknown',
+      selling_price: Number(prod?.selling_price ?? 0),
+      quantity: s.quantity,
+      sale_type: s.sale_type,
+      created_at: s.created_at,
+    };
+  });
 
   const hasStockColumn = !stockResult.error;
   const allProducts = stockResult.data ?? [];
@@ -58,10 +61,10 @@ export async function GET(request: Request) {
     return ts >= new Date(startIso).getTime() && ts < new Date(endIso).getTime();
   });
   const todayCount = todaySales.reduce((sum, s) => sum + s.quantity, 0);
-  const todayTotal = todaySales.reduce(
-    (sum, s) => sum + s.quantity * (s.products?.[0]?.selling_price ?? 0),
-    0
-  );
+  const todayTotal = todaySales.reduce((sum, s) => {
+    const prod = Array.isArray(s.products) ? s.products[0] : s.products;
+    return sum + s.quantity * Number(prod?.selling_price ?? 0);
+  }, 0);
 
   // Outstanding utang (all unpaid).
   const allUtang = utangResult.data ?? [];

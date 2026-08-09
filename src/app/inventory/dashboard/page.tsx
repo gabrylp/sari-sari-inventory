@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/clientApi';
-import { formatMoney, saleTypeLabel } from '@/lib/format';
+import { formatMoney, saleTypeLabel, toLocalDateString } from '@/lib/format';
 import { Badge, Button, Card, StatCard } from '@/components/ui';
 
 const fmtP = formatMoney;
@@ -18,7 +18,7 @@ type RecentSale = {
 };
 
 type LowStockItem = { id: number; product_name: string; stock_quantity: number };
-type Day = { id: number; date: string; profit: number };
+type Day = { id: string; date: string; profit: number };
 
 export default function DashboardPage() {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([]);
@@ -50,10 +50,16 @@ export default function DashboardPage() {
         setHasStockColumn(d.hasStockColumn ?? false);
         setToday(d.today ?? { count: 0, total: 0, utang: 0 });
         setOutstandingUtang(d.outstandingUtang ?? 0);
-        const days: Day[] = (p.data ?? [])
-          .slice(0, 7)
-          .reverse()
-          .map((row: Day) => ({ id: row.id, date: row.date, profit: row.profit }));
+        const profitByDate = new Map<string, number>(
+          (p.data ?? []).map((row: Day) => [row.date, Number(row.profit)])
+        );
+        const days: Day[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const key = toLocalDateString(d);
+          days.push({ id: key, date: key, profit: profitByDate.get(key) ?? 0 });
+        }
         setProfitDays(days);
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load dashboard'))

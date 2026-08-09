@@ -88,3 +88,20 @@ begin
     execute format('revoke all on public.%I from anon, authenticated;', t);
   end loop;
 end $$;
+
+-- 5) Fast sold-count aggregation used by the POS/manage sort. Runs over the
+--    service-role connection (bypasses RLS); returns one row per sold product
+--    instead of the app shipping the whole sales table to the browser.
+--    Column types match the real tables: products.id / sales.product_id are uuid.
+alter table public.products
+  add column if not exists created_at timestamptz not null default now();
+
+create or replace function public.get_product_sold_counts()
+returns table (product_id uuid, sold bigint)
+language sql
+stable
+as $$
+  select product_id, sum(quantity)::bigint
+  from public.sales
+  group by product_id;
+$$;

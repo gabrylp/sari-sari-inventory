@@ -15,6 +15,7 @@ type Product = {
   stock_quantity?: number | null;
   pieces_per_pack?: number | null;
   pack_cost?: number | null;
+  created_at?: string | null;
   bought_count?: number | null;
 };
 
@@ -55,7 +56,7 @@ export default function ManageProductsPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get('/api/products');
+      const { data } = await api.get('/api/products', { ttl: 30000 });
       setProducts(data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load products');
@@ -106,7 +107,7 @@ export default function ManageProductsPage() {
           ? prev.direction === 'ascending'
             ? 'descending'
             : 'ascending'
-          : key === 'id'
+          : key === 'created_at'
             ? 'descending'
             : 'ascending',
     }));
@@ -260,7 +261,7 @@ export default function ManageProductsPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
         />
         <div className="flex gap-2">
-          {(['bought_count', 'id', 'product_name', 'selling_price', 'stock_quantity'] as const).map((key) => (
+          {(['bought_count', 'created_at', 'product_name', 'selling_price', 'stock_quantity'] as const).map((key) => (
             <button
               key={key}
               onClick={() => requestSort(key)}
@@ -277,7 +278,7 @@ export default function ManageProductsPage() {
                   ? 'Price'
                   : key === 'stock_quantity'
                     ? 'Stock'
-                    : key === 'id'
+                    : key === 'created_at'
                       ? 'Recent'
                       : 'Frequent'}{' '}
               {sortIndicator(key)}
