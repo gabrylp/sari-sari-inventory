@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/clientApi';
 import { formatMoney } from '@/lib/format';
-import { Badge, Button, Card, EmptyState, Input, Modal } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Input } from '@/components/ui';
 
 type Product = {
   id: number;
@@ -24,16 +24,14 @@ type SortConfig = { key: keyof Product; direction: 'ascending' | 'descending' };
 const LOW_STOCK_THRESHOLD = 10;
 const fmtP = formatMoney;
 
-const emptyForm = {
-  product_name: '',
-  product_code: '',
-  category: '',
-  selling_price: 0,
-  grocery_price: 0,
-  stock_quantity: '',
-  pieces_per_pack: '',
-  pack_cost: '',
-};
+type EditField =
+  | 'product_name'
+  | 'product_code'
+  | 'category'
+  | 'selling_price'
+  | 'grocery_price'
+  | 'stock_quantity'
+  | 'pack';
 
 export default function ManageProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -47,8 +45,11 @@ export default function ManageProductsPage() {
   const [onlyLow, setOnlyLow] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
-  const [editProduct, setEditProduct] = useState<Product | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [editingCell, setEditingCell] = useState<{ id: string; field: EditField } | null>(null);
+  const [cellDraft, setCellDraft] = useState('');
+  const [packDraft, setPackDraft] = useState({ pieces: '', cost: '' });
+  const packPiecesRef = useRef<HTMLInputElement>(null);
+  const packCostRef = useRef<HTMLInputElement>(null);
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
@@ -116,74 +117,208 @@ export default function ManageProductsPage() {
   const sortIndicator = (key: keyof Product) =>
     sortConfig?.key === key ? (sortConfig.direction === 'ascending' ? '↑' : '↓') : '↕';
 
-  function openEdit(product: Product) {
-    setEditProduct(product);
-    setForm({
-      product_name: product.product_name,
-      product_code: product.product_code ?? '',
-      category: product.category ?? '',
-      selling_price: product.selling_price,
-      grocery_price: product.grocery_price,
-      stock_quantity: product.stock_quantity === null || product.stock_quantity === undefined
-        ? ''
-        : String(product.stock_quantity),
-      pieces_per_pack:
-        product.pieces_per_pack === null || product.pieces_per_pack === undefined
+  function cellValue(p: Product, field: EditField): string {
+    switch (field) {
+      case 'product_name':
+        return p.product_name;
+      case 'product_code':
+        return p.product_code ?? '';
+      case 'category':
+        return p.category ?? '';
+      case 'selling_price':
+        return String(p.selling_price);
+      case 'grocery_price':
+        return String(p.grocery_price);
+      case 'stock_quantity':
+        return p.stock_quantity === null || p.stock_quantity === undefined
           ? ''
-          : String(product.pieces_per_pack),
-      pack_cost:
-        product.pack_cost === null || product.pack_cost === undefined ? '' : String(product.pack_cost),
-    });
-    setMessage(null);
+          : String(p.stock_quantity);
+      case 'pack':
+        return '';
+    }
   }
 
-  function setPackPieces(v: string) {
-    setForm((prev) => {
-      const pieces = Number(v);
-      const cost = Number(prev.pack_cost);
-      const grocery =
-        v && prev.pack_cost && pieces >= 2 && cost > 0 ? (cost / pieces).toFixed(2) : prev.grocery_price;
-      return { ...prev, pieces_per_pack: v, grocery_price: Number(grocery) };
-    });
+  function startCell(p: Product, field: EditField) {
+    setEditingCell({ id: String(p.id), field });
+    setCellDraft(cellValue(p, field));
   }
 
-  function setPackCost(v: string) {
-    setForm((prev) => {
-      const pieces = Number(prev.pieces_per_pack);
-      const cost = Number(v);
-      const grocery =
-        prev.pieces_per_pack && v && pieces >= 2 && cost > 0 ? (cost / pieces).toFixed(2) : prev.grocery_price;
-      return { ...prev, pack_cost: v, grocery_price: Number(grocery) };
+  function startPack(p: Product) {
+    setEditingCell({ id: String(p.id), field: 'pack' });
+    setPackDraft({
+      pieces: p.pieces_per_pack?.toString() ?? '',
+      cost: p.pack_cost?.toString() ?? '',
     });
   }
 
-  async function saveEdit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editProduct) return;
+  function cancelCell() {
+    setEditingCell(null);
+    setCellDraft('');
+    setPackDraft({ pieces: '', cost: '' });
+  }
 
-    if (!form.product_name || !form.selling_price || !form.grocery_price) {
-      setMessage({ text: 'Please fill in all fields', isError: true });
-      return;
+  const editingHere = (p: Product, field: EditField) =>
+    editingCell?.id === String(p.id) && editingCell?.field === field;
+
+  async function commitCell() {
+    const cell = editingCell;
+    if (!cell || cell.field === 'pack') return;
+    const product = products.find((x) => String(x.id) === cell.id);
+    if (!product) return cancelCell();
+
+    const original = cellValue(product, cell.field);
+    const draft = cellDraft.trim();
+    if (draft === original) return cancelCell();
+
+    let value: unknown = draft;
+    if (cell.field === 'selling_price' || cell.field === 'grocery_price') {
+      const n = Number(draft);
+      if (draft === '' || !Number.isFinite(n)) {
+        setMessage({ text: 'Enter a valid price', isError: true });
+        return cancelCell();
+      }
+      value = n;
+    } else if (cell.field === 'stock_quantity') {
+      value = draft === '' ? null : Number(draft);
     }
 
+    cancelCell();
     try {
-      await api.put(`/api/products/${editProduct.id}`, {
-        product_name: form.product_name,
-        product_code: form.product_code || null,
-        category: form.category || null,
-        selling_price: Number(form.selling_price),
-        grocery_price: Number(form.grocery_price),
-        stock_quantity: form.stock_quantity === '' ? null : Number(form.stock_quantity),
-        pieces_per_pack: form.pieces_per_pack === '' ? null : Number(form.pieces_per_pack),
-        pack_cost: form.pack_cost === '' ? null : Number(form.pack_cost),
-      });
-      setMessage({ text: 'Product updated successfully!', isError: false });
-      setEditProduct(null);
-      setForm(emptyForm);
+      await api.put(`/api/products/${product.id}`, { [cell.field]: value });
+      setMessage({ text: 'Product updated', isError: false });
       fetchProducts();
     } catch (err) {
-      setMessage({ text: err instanceof Error ? err.message : 'Error updating product', isError: true });
+      setMessage({ text: err instanceof Error ? err.message : 'Update failed', isError: true });
     }
+  }
+
+  async function commitPack() {
+    const cell = editingCell;
+    if (!cell || cell.field !== 'pack') return;
+    const product = products.find((x) => String(x.id) === cell.id);
+    if (!product) return cancelCell();
+
+    if (packDraft.pieces === '' || packDraft.cost === '') return cancelCell();
+    const pieces = Number(packDraft.pieces);
+    const cost = Number(packDraft.cost);
+    if (!Number.isInteger(pieces) || pieces < 2 || !Number.isFinite(cost) || cost < 0) {
+      setMessage({ text: 'Pack needs at least 2 pieces and a valid cost', isError: true });
+      return cancelCell();
+    }
+
+    cancelCell();
+    try {
+      await api.put(`/api/products/${product.id}`, {
+        pieces_per_pack: pieces,
+        pack_cost: cost,
+        grocery_price: Math.round((cost / pieces) * 100) / 100,
+      });
+      setMessage({ text: 'Product updated', isError: false });
+      fetchProducts();
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'Update failed', isError: true });
+    }
+  }
+
+  const onPackBlur = (side: 'pieces' | 'cost') => () => {
+    const other = side === 'pieces' ? packCostRef.current : packPiecesRef.current;
+    if (document.activeElement === other) return;
+    commitPack();
+  };
+
+  const onPackKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitPack();
+    } else if (e.key === 'Escape') {
+      cancelCell();
+    }
+  };
+
+  const onCellKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      cancelCell();
+    }
+  };
+
+  const cellInputClass = (field: EditField) =>
+    'w-full bg-card border border-line rounded px-1.5 py-0.5 text-sm outline-none focus:border-accent ' +
+    (field === 'product_name' ? 'font-semibold ' : '') +
+    (field === 'selling_price' || field === 'grocery_price' || field === 'stock_quantity'
+      ? 'text-right '
+      : '');
+
+  function editableCell(
+    p: Product,
+    field: EditField,
+    className: string,
+    content: React.ReactNode
+  ) {
+    if (!editingHere(p, field)) {
+      return (
+        <td
+          className={`${className} cursor-cell`}
+          title="Double-click to edit"
+          onDoubleClick={() => (field === 'pack' ? startPack(p) : startCell(p, field))}
+        >
+          {content}
+        </td>
+      );
+    }
+
+    if (field === 'pack') {
+      return (
+        <td className={`${className} cursor-cell`}>
+          <div className="flex items-center justify-end gap-1.5">
+            <input
+              ref={packPiecesRef}
+              autoFocus
+              type="number"
+              min="2"
+              step="1"
+              value={packDraft.pieces}
+              onChange={(e) => setPackDraft((d) => ({ ...d, pieces: e.target.value }))}
+              onBlur={onPackBlur('pieces')}
+              onKeyDown={onPackKey}
+              placeholder="pcs"
+              className={`${cellInputClass('pack')} w-16`}
+            />
+            <input
+              ref={packCostRef}
+              type="number"
+              min="0"
+              step="0.01"
+              value={packDraft.cost}
+              onChange={(e) => setPackDraft((d) => ({ ...d, cost: e.target.value }))}
+              onBlur={onPackBlur('cost')}
+              onKeyDown={onPackKey}
+              placeholder="₱0.00"
+              className={`${cellInputClass('pack')} w-20`}
+            />
+          </div>
+        </td>
+      );
+    }
+
+    const isText = field === 'product_name' || field === 'product_code' || field === 'category';
+    return (
+      <td className={className}>
+        <input
+          autoFocus
+          type={isText ? 'text' : 'number'}
+          step={field === 'stock_quantity' ? '1' : '0.01'}
+          min={field === 'stock_quantity' ? 0 : undefined}
+          value={cellDraft}
+          onChange={(e) => setCellDraft(e.target.value)}
+          onBlur={commitCell}
+          onKeyDown={onCellKey}
+          className={cellInputClass(field)}
+        />
+      </td>
+    );
   }
 
   async function handleDelete(id: number) {
@@ -344,29 +479,32 @@ export default function ManageProductsPage() {
                         className="w-4 h-4 accent-accent"
                       />
                     </td>
-                    <td className="p-2 font-semibold">{p.product_name}</td>
-                    <td className="p-2 text-sub">{p.product_code ?? '—'}</td>
-                    <td className="p-2 text-sub">{p.category ?? '—'}</td>
-                    <td className="p-2 text-right text-sub">
-                      {p.pieces_per_pack ? `${p.pieces_per_pack} / pack` : '—'}
-                    </td>
-                    <td className="p-2 text-right">{fmtP(p.selling_price)}</td>
-                    <td className="p-2 text-right">{fmtP(p.grocery_price)}</td>
-                    <td className="p-2 text-right">
-                      {p.stock_quantity === null || p.stock_quantity === undefined ? (
+                    {editableCell(p, 'product_name', 'p-2 font-semibold', p.product_name)}
+                    {editableCell(p, 'product_code', 'p-2 text-sub', p.product_code ?? '—')}
+                    {editableCell(p, 'category', 'p-2 text-sub', p.category ?? '—')}
+                    {editableCell(
+                      p,
+                      'pack',
+                      'p-2 text-right text-sub',
+                      p.pieces_per_pack ? `${p.pieces_per_pack} / pack` : '—'
+                    )}
+                    {editableCell(p, 'selling_price', 'p-2 text-right', fmtP(p.selling_price))}
+                    {editableCell(p, 'grocery_price', 'p-2 text-right', fmtP(p.grocery_price))}
+                    {editableCell(
+                      p,
+                      'stock_quantity',
+                      'p-2 text-right',
+                      p.stock_quantity === null || p.stock_quantity === undefined ? (
                         <span className="text-sub">—</span>
                       ) : (
                         <Badge tone={low ? 'warn' : 'ok'}>{p.stock_quantity}</Badge>
-                      )}
-                    </td>
+                      )
+                    )}
                     <td className="p-2 text-right">
                       <Badge tone="muted">×{p.bought_count ?? 0}</Badge>
                     </td>
                     <td className="p-2 text-right whitespace-nowrap">
-                      <Button variant="ghost" className="py-1 px-2 text-sm" onClick={() => openEdit(p)}>
-                        Edit
-                      </Button>
-                      <Button variant="danger" className="py-1 px-2 text-sm ml-2" onClick={() => handleDelete(p.id)}>
+                      <Button variant="danger" className="py-1 px-2 text-sm" onClick={() => handleDelete(p.id)}>
                         Delete
                       </Button>
                     </td>
@@ -377,101 +515,6 @@ export default function ManageProductsPage() {
           </table>
         </div>
       )}
-
-      <Modal open={editProduct !== null} onClose={() => setEditProduct(null)} title="Edit Product">
-        <form onSubmit={saveEdit} className="space-y-4">
-          <div>
-            <label className="block mb-1 font-semibold text-ink">Product Name</label>
-            <Input value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Code</label>
-              <Input
-                value={form.product_code}
-                onChange={(e) => setForm({ ...form, product_code: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Category</label>
-              <Input
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Selling (₱)</label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.selling_price}
-                onChange={(e) => setForm({ ...form, selling_price: Number(e.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Grocery (₱)</label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.grocery_price}
-                onChange={(e) => setForm({ ...form, grocery_price: Number(e.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Stock</label>
-              <Input
-                type="number"
-                min="0"
-                value={form.stock_quantity}
-                onChange={(e) => setForm({ ...form, stock_quantity: e.target.value })}
-                placeholder="—"
-              />
-            </div>
-          </div>
-
-<div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Pieces / pack</label>
-              <Input
-                type="number"
-                step="1"
-                min="2"
-                value={form.pieces_per_pack}
-                onChange={(e) => setPackPieces(e.target.value)}
-                placeholder="e.g. 24"
-              />
-            </div>
-            <div>
-              <label className="block mb-1 font-semibold text-ink">Pack cost (₱)</label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.pack_cost}
-                onChange={(e) => setPackCost(e.target.value)}
-                placeholder="e.g. 130"
-              />
-            </div>
-          </div>
-
-          {message && (
-            <p className={`text-sm font-semibold ${message.isError ? 'text-warn' : 'text-ok'}`}>
-              {message.text}
-            </p>
-          )}
-
-          <div className="flex gap-2">
-            <Button type="submit" className="flex-1">
-              Save
-            </Button>
-            <Button variant="ghost" type="button" onClick={() => setEditProduct(null)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

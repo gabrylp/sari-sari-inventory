@@ -8,55 +8,83 @@ export async function PUT(request: Request, { params }: Params) {
   const body = await request.json().catch(() => null);
   if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
 
-  const productName = String(body.product_name ?? '').trim();
-  const sellingPrice = Number(body.selling_price);
-  const groceryPrice = Number(body.grocery_price);
+  const updatePayload: Record<string, unknown> = {};
 
-  if (!productName || !Number.isFinite(sellingPrice) || !Number.isFinite(groceryPrice)) {
-    return NextResponse.json({ error: 'Missing or invalid product fields' }, { status: 400 });
+  if ('product_name' in body) {
+    const productName = String(body.product_name ?? '').trim();
+    if (!productName) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });
+    updatePayload.product_name = productName;
+  }
+
+  if ('selling_price' in body) {
+    const sellingPrice = Number(body.selling_price);
+    if (!Number.isFinite(sellingPrice)) {
+      return NextResponse.json({ error: 'Invalid selling price' }, { status: 400 });
+    }
+    updatePayload.selling_price = sellingPrice;
+  }
+
+  if ('grocery_price' in body) {
+    const groceryPrice = Number(body.grocery_price);
+    if (!Number.isFinite(groceryPrice)) {
+      return NextResponse.json({ error: 'Invalid grocery price' }, { status: 400 });
+    }
+    updatePayload.grocery_price = groceryPrice;
+  }
+
+  if ('stock_quantity' in body) {
+    const stockQuantity = Number(body.stock_quantity);
+    if (body.stock_quantity !== '' && body.stock_quantity !== null && !Number.isNaN(stockQuantity)) {
+      updatePayload.stock_quantity = stockQuantity;
+    } else {
+      updatePayload.stock_quantity = null;
+    }
+  }
+
+  if ('product_code' in body) {
+    const productCode = String(body.product_code ?? '').trim();
+    updatePayload.product_code = productCode || null;
+  }
+
+  if ('category' in body) {
+    const category = String(body.category ?? '').trim();
+    updatePayload.category = category || null;
+  }
+
+  if ('pieces_per_pack' in body) {
+    const piecesPerPack = body.pieces_per_pack;
+    if (piecesPerPack !== undefined && piecesPerPack !== null && piecesPerPack !== '') {
+      const pieces = Number(piecesPerPack);
+      if (!Number.isInteger(pieces) || pieces < 2) {
+        return NextResponse.json(
+          { error: 'Pieces per pack must be a whole number of at least 2' },
+          { status: 400 }
+        );
+      }
+      updatePayload.pieces_per_pack = pieces;
+    } else {
+      updatePayload.pieces_per_pack = null;
+    }
+  }
+
+  if ('pack_cost' in body) {
+    const packCost = body.pack_cost;
+    if (packCost !== undefined && packCost !== null && packCost !== '') {
+      const cost = Number(packCost);
+      if (!Number.isFinite(cost) || cost < 0) {
+        return NextResponse.json({ error: 'Pack cost must be a positive amount' }, { status: 400 });
+      }
+      updatePayload.pack_cost = cost;
+    } else {
+      updatePayload.pack_cost = null;
+    }
+  }
+
+  if (Object.keys(updatePayload).length === 0) {
+    return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
   }
 
   const admin = getAdmin();
-  const updatePayload: Record<string, unknown> = {
-    product_name: productName,
-    selling_price: sellingPrice,
-    grocery_price: groceryPrice,
-  };
-
-  const stockQuantity = Number(body.stock_quantity);
-  if (body.stock_quantity !== undefined && body.stock_quantity !== '' && !Number.isNaN(stockQuantity)) {
-    updatePayload.stock_quantity = stockQuantity;
-  }
-  if (body.stock_quantity === '' || body.stock_quantity === null) {
-    updatePayload.stock_quantity = null;
-  }
-
-  const productCode = String(body.product_code ?? '').trim();
-  updatePayload.product_code = productCode || null;
-
-  const category = String(body.category ?? '').trim();
-  updatePayload.category = category || null;
-
-  const piecesPerPack = body.pieces_per_pack;
-  const packCost = body.pack_cost;
-  if (piecesPerPack !== undefined && piecesPerPack !== null && piecesPerPack !== '') {
-    const pieces = Number(piecesPerPack);
-    if (!Number.isInteger(pieces) || pieces < 2) {
-      return NextResponse.json({ error: 'Pieces per pack must be a whole number of at least 2' }, { status: 400 });
-    }
-    updatePayload.pieces_per_pack = pieces;
-  } else {
-    updatePayload.pieces_per_pack = null;
-  }
-  if (packCost !== undefined && packCost !== null && packCost !== '') {
-    const cost = Number(packCost);
-    if (!Number.isFinite(cost) || cost < 0) {
-      return NextResponse.json({ error: 'Pack cost must be a positive amount' }, { status: 400 });
-    }
-    updatePayload.pack_cost = cost;
-  } else {
-    updatePayload.pack_cost = null;
-  }
 
   const { data, error } = await admin
     .from('products')
