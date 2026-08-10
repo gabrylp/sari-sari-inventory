@@ -245,8 +245,9 @@ export default function ManageProductsPage() {
   };
 
   const cellInputClass = (field: EditField) =>
-    'w-full bg-card border border-line rounded px-1.5 py-0.5 text-sm outline-none focus:border-accent ' +
+    'bg-card border border-line rounded px-1.5 py-0.5 text-sm outline-none focus:border-accent ' +
     (field === 'product_name' ? 'font-semibold ' : '') +
+    (field === 'product_name' || field === 'product_code' || field === 'category' ? 'w-full ' : '') +
     (field === 'selling_price' || field === 'grocery_price' || field === 'stock_quantity'
       ? 'text-right '
       : '');
@@ -315,6 +316,9 @@ export default function ManageProductsPage() {
           onChange={(e) => setCellDraft(e.target.value)}
           onBlur={commitCell}
           onKeyDown={onCellKey}
+          style={
+            isText ? undefined : { width: `${Math.max(cellDraft.length, 4) + 2}ch` }
+          }
           className={cellInputClass(field)}
         />
       </td>
